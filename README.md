@@ -11,7 +11,7 @@
 
 ## Purpose
 
-Retrocession federated remote: screens, widgets, record tabs, and transaction composition. Assumed-book retrocession contracts, retro rules, FS-RI hand-off, and recoverables.
+Retrocession federated remote: screens, widgets, record tabs, and transaction composition. Reinsurance-book retrocession contracts, retro rules, FS-RI hand-off, and recoverables.
 
 ## Responsibilities
 
