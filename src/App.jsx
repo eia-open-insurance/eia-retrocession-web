@@ -1,8 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import EntityPicker from './EntityPicker.jsx';
+import { navigate, recordHref } from './navigation.js';
 import './ui.css';
+import './ui-overrides.css';
 
 const TENANT = '11111111-1111-7111-8111-111111111111';
 const BOOK = 'ASSUMED';
+const CONTRACT_SEARCH = '/api/v1/contracts/search';
+const ASSUMED_CLAIMS_SEARCH = '/api/v1/assumed-claims/search';
+
+const BOOK_HEADERS = {
+  'X-EIA-Tenant': TENANT,
+  'X-EIA-Book': BOOK
+};
 
 const NEXT_STATUS = {
   OPEN: ['RULE_APPLIED', 'CANCELLED'],
@@ -60,6 +70,52 @@ function shortId(value) {
   if (!value) return '—';
   const text = String(value);
   return text.length > 8 ? `${text.slice(0, 8)}…` : text;
+}
+
+/** Reads the shell deep-link parameters for this remote. */
+function readRoute() {
+  if (typeof window === 'undefined' || !window.location) {
+    return { record: null, isNew: false };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return { record: params.get('record'), isNew: params.get('new') === '1' };
+}
+
+/** Search endpoints return either the shared envelope or a bare list. */
+function searchItems(body) {
+  if (Array.isArray(body)) return body;
+  return Array.isArray(body?.items) ? body.items : [];
+}
+
+function matchesQueueFilter(record, needle) {
+  if (!needle) return true;
+  return [record.retrocessionNumber, record.contractId, record.retroContractId, record.status]
+    .some((value) => value !== null && value !== undefined
+      && String(value).toLowerCase().includes(needle));
+}
+
+function contractOptionLabel(item) {
+  if (!item) return '';
+  return [item.label, item.secondary].filter(Boolean).join(' · ');
+}
+
+function ContractLink({ contractId, label, testId, className = 'eia-mono' }) {
+  if (!contractId) return <span>—</span>;
+  const href = recordHref('contract', contractId);
+  return (
+    <a
+      href={href}
+      className={className}
+      data-testid={testId}
+      title={`Open contract ${contractId}`}
+      onClick={(event) => {
+        event.preventDefault();
+        navigate(href);
+      }}
+    >
+      {label || shortId(contractId)}
+    </a>
+  );
 }
 
 function formatAmount(value, currency) {
@@ -182,7 +238,7 @@ function problemMessage(body, fallback) {
 }
 
 async function api(path, options = {}) {
-  const headers = { 'X-EIA-Tenant': TENANT, 'X-EIA-Book': BOOK };
+  const headers = { ...BOOK_HEADERS };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {
     method: options.method || 'GET',
@@ -201,17 +257,29 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState('overview');
   const [form, setForm] = useState(EMPTY_FORM);
-  const [showCreate, setShowCreate] = useState(false);
+  const [formContractLabel, setFormContractLabel] = useState('');
+  const [showCreate, setShowCreate] = useState(() => readRoute().isNew);
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(null);
   const [handoffContractNumber, setHandoffContractNumber] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [filter, setFilter] = useState('');
+  const [routeVersion, setRouteVersion] = useState(0);
+  const [contract, setContract] = useState(null);
+  const [relatedClaims, setRelatedClaims] = useState([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const discoveryRef = useRef(new Set());
 
   const selected = retrocessions.find((record) => record.id === selectedId) || null;
   const history = selected ? historyRows(selected) : [];
   const targets = selected ? lifecycleTargets(selected) : [];
+  const needle = filter.trim().toLowerCase();
+  const visibleRetrocessions = needle
+    ? retrocessions.filter((record) => matchesQueueFilter(record, needle))
+    : retrocessions;
+  const contractLabel = contract?.contractNumber || '';
 
   async function load() {
     const rows = await api('/api/v1/retrocessions');
@@ -227,11 +295,98 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const onPop = () => setRouteVersion((value) => value + 1);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  useEffect(() => {
     setSelectedId((current) => {
       if (current && retrocessions.some((record) => record.id === current)) return current;
       return retrocessions[0]?.id || null;
     });
   }, [retrocessions]);
+
+  useEffect(() => {
+    const route = readRoute();
+    setShowCreate(route.isNew);
+    if (route.record) {
+      const match = retrocessions.find((record) => record.id === route.record);
+      if (match && match.id !== selectedId) {
+        setSelectedId(match.id);
+        setTab('overview');
+        setError('');
+        setNotice('');
+      } else if (!match && !loading && !creating && !discoveryRef.current.has(route.record)) {
+        // A deep link can point at a record outside the loaded queue. Resolve it
+        // through the canonical ASSUMED-book read and fold it into the queue.
+        discoveryRef.current.add(route.record);
+        api(`/api/v1/retrocessions/${encodeURIComponent(route.record)}`)
+          .then((record) => {
+            if (!record?.id) return;
+            setRetrocessions((current) => (
+              current.some((item) => item.id === record.id) ? current : [record, ...current]
+            ));
+          })
+          .catch(() => {
+            discoveryRef.current.delete(route.record);
+          });
+      }
+    } else if (routeVersion > 0 && !route.isNew && selectedId !== retrocessions[0]?.id) {
+      setSelectedId(retrocessions[0]?.id || null);
+    }
+  }, [retrocessions, routeVersion, selectedId, loading, creating]);
+
+  useEffect(() => {
+    const contractId = selected?.contractId;
+    setContract(null);
+    if (!contractId) return undefined;
+    let cancelled = false;
+    fetch(`/api/v1/contracts/${encodeURIComponent(contractId)}`, { headers: { ...BOOK_HEADERS } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (!cancelled && body && body.id) setContract(body);
+      })
+      .catch(() => {
+        // The link still works from the contract id when the lookup is unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.contractId]);
+
+  useEffect(() => {
+    const contractId = selected?.contractId;
+    if (!contractId) {
+      setRelatedClaims([]);
+      setRelatedLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setRelatedLoading(true);
+    fetch(`${ASSUMED_CLAIMS_SEARCH}?q=${encodeURIComponent(contractId)}&limit=5`, {
+      headers: { ...BOOK_HEADERS }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Assumed claim lookup failed (${response.status})`);
+        return response.json();
+      })
+      .then((body) => {
+        if (!cancelled) {
+          setRelatedClaims(searchItems(body));
+          setRelatedLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRelatedClaims([]);
+          setRelatedLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.contractId]);
 
   useEffect(() => {
     setHandoffContractNumber('');
@@ -251,24 +406,35 @@ export default function App() {
   }
 
   function selectRecord(record) {
-    if (record.id === selectedId) return;
-    setSelectedId(record.id);
-    setTab('overview');
+    if (record.id !== selectedId) {
+      setSelectedId(record.id);
+      setTab('overview');
+      setError('');
+      setNotice('');
+    }
+    navigate(recordHref('retrocession', record.id));
+  }
+
+  function selectSourceContract(id, item) {
+    update('contractId', id);
+    setFormContractLabel(contractOptionLabel(item));
     setError('');
-    setNotice('');
   }
 
   function openCreate() {
     setForm(EMPTY_FORM);
+    setFormContractLabel('');
     setError('');
     setNotice('');
     setShowCreate(true);
+    navigate('/retrocession?new=1');
   }
 
   function closeCreate() {
     if (creating) return;
     setShowCreate(false);
     setError('');
+    navigate(selectedId ? recordHref('retrocession', selectedId) : '/retrocession');
   }
 
   async function refresh() {
@@ -287,6 +453,10 @@ export default function App() {
   async function submit(event) {
     event.preventDefault();
     setError('');
+    if (!form.contractId.trim()) {
+      setError('Choose a source contract from the ASSUMED book before creating the retro case.');
+      return;
+    }
     setCreating(true);
     try {
       const created = await api('/api/v1/retrocessions', {
@@ -300,7 +470,9 @@ export default function App() {
         }
       });
       setForm(EMPTY_FORM);
+      setFormContractLabel('');
       setShowCreate(false);
+      navigate(created?.id ? recordHref('retrocession', created.id) : '/retrocession');
       const items = await load();
       if (created?.id) {
         setSelectedId(created.id);
@@ -380,6 +552,27 @@ export default function App() {
         </div>
       </header>
 
+      <div className="eia-toolbar eia-queue-search" role="search" aria-label="Retrocession queue filter">
+        <input
+          type="search"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter retrocessions by number, contract, or status…"
+          aria-label="Filter retrocessions"
+          autoComplete="off"
+        />
+        {filter && (
+          <button type="button" className="eia-btn-secondary" onClick={() => setFilter('')}>
+            Clear
+          </button>
+        )}
+        <span className="eia-muted" data-testid="queue-filter-count">
+          {needle
+            ? `${visibleRetrocessions.length} of ${retrocessions.length} retrocession${retrocessions.length === 1 ? '' : 's'}`
+            : `${retrocessions.length} retrocession${retrocessions.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+
       {notice && <p role="status" style={{ margin: '0 0 12px' }}>{notice}</p>}
       {error && !showCreate && <p role="alert" style={{ margin: '0 0 12px' }}>{error}</p>}
 
@@ -387,9 +580,9 @@ export default function App() {
         <aside className="eia-record-list" aria-label="Retrocession queue">
           <div className="eia-record-list-head">
             <strong>Retrocession queue</strong>
-            <span className="eia-muted">{loading ? '…' : retrocessions.length}</span>
+            <span className="eia-muted">{loading ? '…' : visibleRetrocessions.length}</span>
           </div>
-          {retrocessions.map((record) => {
+          {visibleRetrocessions.map((record) => {
             const isSelected = record.id === selectedId;
             return (
               <button
@@ -401,7 +594,12 @@ export default function App() {
                 onClick={() => selectRecord(record)}
               >
                 <span className="record-primary">{record.retrocessionNumber}</span>
-                <span className="record-secondary">Contract {shortId(record.contractId)}</span>
+                <span className="record-secondary">
+                  Contract{' '}
+                  {contract?.id === record.contractId && contractLabel
+                    ? contractLabel
+                    : shortId(record.contractId)}
+                </span>
                 <span className="record-secondary">
                   <span className={`eia-pill ${statusTone(record.status)}`}>{record.status}</span>
                 </span>
@@ -413,6 +611,11 @@ export default function App() {
           )}
           {!loading && retrocessions.length === 0 && (
             <div className="empty">No retro cases yet. Use Create retrocession to open the first case.</div>
+          )}
+          {!loading && retrocessions.length > 0 && visibleRetrocessions.length === 0 && (
+            <div className="empty" data-testid="queue-filter-empty">
+              No retrocessions match “{filter.trim()}”. Clear the filter to see the full queue.
+            </div>
           )}
         </aside>
 
@@ -443,9 +646,14 @@ export default function App() {
                     {formatAmount(selected.cededLoss, selected.currency)}
                   </p>
                   <p className="eia-record-subtitle">
-                    Source contract <span className="eia-mono">{shortId(selected.contractId)}</span> · Retro
-                    contract <span className="eia-mono">{shortId(selected.retroContractId)}</span> · Version{' '}
-                    {selected.version ?? 0}
+                    Source contract{' '}
+                    <ContractLink
+                      contractId={selected.contractId}
+                      label={contractLabel}
+                      testId="source-contract-link"
+                    />{' '}
+                    · Retro contract <span className="eia-mono">{shortId(selected.retroContractId)}</span> ·
+                    Version {selected.version ?? 0}
                   </p>
                 </div>
                 <div className="eia-actions">
@@ -505,6 +713,36 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="eia-context-panel" data-testid="why-this-matters">
+                <h4>Why this matters</h4>
+                <p>
+                  This retrocession sits behind the assumed contract{' '}
+                  <ContractLink
+                    contractId={selected.contractId}
+                    label={contractLabel}
+                    testId="context-contract-link"
+                  />
+                  . The contract and its assumed claims are upstream; actual retro amounts,
+                  recoveries, and statements remain FS-RI-owned. This workbench holds the expected
+                  ceded premium and loss plus the hand-off references, not the posted retro ledger.
+                </p>
+                <div className="links">
+                  {selected.contractId && (
+                    <a
+                      href={recordHref('contract', selected.contractId)}
+                      data-testid="context-contract-record-link"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        navigate(recordHref('contract', selected.contractId));
+                      }}
+                    >
+                      Open assumed contract
+                    </a>
+                  )}
+                  <a href="#related-records">Assumed claims upstream</a>
+                </div>
+              </div>
+
               <nav className="eia-tabs" role="tablist" aria-label="Retrocession sections">
                 {TABS.map((entry) => (
                   <button
@@ -541,7 +779,13 @@ export default function App() {
                           <span className="eia-badge assumed">ASSUMED</span>
                         </dd>
                         <dt>Source contract</dt>
-                        <dd className="eia-mono">{selected.contractId || '—'}</dd>
+                        <dd>
+                          <ContractLink
+                            contractId={selected.contractId}
+                            label={contractLabel}
+                            testId="source-contract-detail-link"
+                          />
+                        </dd>
                         <dt>Retro contract</dt>
                         <dd className="eia-mono">{selected.retroContractId || '—'}</dd>
                         <dt>Ceded premium</dt>
@@ -616,6 +860,71 @@ export default function App() {
                       )}
                     </section>
                   </div>
+
+                  <section
+                    className="eia-card"
+                    id="related-records"
+                    aria-label="Upstream records"
+                    data-testid="related-records"
+                    style={{ marginTop: 14 }}
+                  >
+                    <h3>Upstream records</h3>
+                    <p className="eia-muted" style={{ marginTop: 4 }}>
+                      The assumed contract and its claims are upstream of this retro case. Actual retro
+                      amounts and recoverables remain FS-RI-owned.
+                    </p>
+                    <div className="eia-related-group" data-testid="related-contract">
+                      <h4 className="eia-related-title">Assumed contract</h4>
+                      {selected.contractId ? (
+                        <div className="eia-related-list">
+                          <a
+                            className="eia-related-record"
+                            href={recordHref('contract', selected.contractId)}
+                            data-testid="related-contract-link"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              navigate(recordHref('contract', selected.contractId));
+                            }}
+                          >
+                            <b>{contractLabel || shortId(selected.contractId)}</b>
+                            <span>{contract?.contractType || 'ASSUMED contract'}</span>
+                            {contract?.status && <em>{contract.status}</em>}
+                          </a>
+                        </div>
+                      ) : (
+                        <p className="eia-muted">No source contract is linked to this retro case.</p>
+                      )}
+                    </div>
+                    <div className="eia-related-group" data-testid="related-assumed-claims">
+                      <h4 className="eia-related-title">Assumed claims</h4>
+                      {relatedLoading ? (
+                        <p className="eia-muted">Loading related assumed claims…</p>
+                      ) : relatedClaims.length === 0 ? (
+                        <p className="eia-muted">No assumed claims reference this contract.</p>
+                      ) : (
+                        <div className="eia-related-list">
+                          {relatedClaims.map((item, index) => {
+                            const href = item.href || recordHref('assumed-claims', item.id);
+                            return (
+                              <a
+                                key={item.id || item.href || `assumed-claim-${index}`}
+                                className="eia-related-record"
+                                href={href}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  navigate(href);
+                                }}
+                              >
+                                <b>{item.label}</b>
+                                <span>{item.secondary}</span>
+                                {item.status && <em>{item.status}</em>}
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </section>
                 </section>
               )}
 
@@ -773,15 +1082,27 @@ export default function App() {
 
             <form className="eia-form-grid" onSubmit={submit} style={{ marginTop: 16 }}>
               <div className="eia-field span-3">
-                <label htmlFor="create-contract-id">Source contract ID</label>
-                <input
-                  id="create-contract-id"
+                <label>Source contract</label>
+                <EntityPicker
+                  endpoint={CONTRACT_SEARCH}
+                  book={BOOK}
                   value={form.contractId}
-                  onChange={(event) => update('contractId', event.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  required
-                  autoFocus
+                  valueLabel={formContractLabel}
+                  onChange={selectSourceContract}
+                  placeholder="Search contracts by number or type…"
                 />
+                {form.contractId && (
+                  <a
+                    href={recordHref('contract', form.contractId)}
+                    data-testid="create-contract-link"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate(recordHref('contract', form.contractId));
+                    }}
+                  >
+                    Open contract record
+                  </a>
+                )}
               </div>
               <div className="eia-field span-3">
                 <label htmlFor="create-retro-contract-id">Retro contract ID</label>
@@ -792,6 +1113,10 @@ export default function App() {
                   placeholder="00000000-0000-0000-0000-000000000000"
                   required
                 />
+                <span className="eia-picker-hint">
+                  FS-RI-owned retro contract reference; the assumed contract above is the upstream
+                  business record.
+                </span>
               </div>
               <div className="eia-field">
                 <label htmlFor="create-ceded-premium">Ceded premium</label>

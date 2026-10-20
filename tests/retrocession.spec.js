@@ -110,6 +110,22 @@ test('creates a retrocession from the modal against the ASSUMED book', async ({ 
     }
     await json(route, 404, { message: `unexpected ${request.method()} ${url.pathname}` });
   });
+  await page.route('**/api/v1/contracts/search**', async (route) =>
+    json(route, 200, {
+      query: 'XOL',
+      limit: 8,
+      items: [
+        {
+          id: '33333333-3333-7333-8333-333333333333',
+          type: 'CONTRACT',
+          label: 'XOL-2026-00091',
+          secondary: 'EXCESS_OF_LOSS · BOUND',
+          status: 'BOUND',
+          href: '/contract?record=33333333-3333-7333-8333-333333333333'
+        }
+      ]
+    })
+  );
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Create retrocession' }).click();
@@ -118,7 +134,9 @@ test('creates a retrocession from the modal against the ASSUMED book', async ({ 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Create retrocession' })).toBeVisible();
 
-  await dialog.getByLabel('Source contract ID').fill('33333333-3333-7333-8333-333333333333');
+  await dialog.getByPlaceholder('Search contracts by number or type…').fill('XOL');
+  await page.locator('.eia-picker-option').filter({ hasText: 'XOL-2026-00091' }).click();
+  await expect(dialog.locator('.eia-picker-selected')).toContainText('XOL-2026-00091');
   await dialog.getByLabel('Retro contract ID').fill('44444444-4444-7444-8444-444444444444');
   await dialog.getByLabel('Ceded premium').fill('1250000');
   await dialog.getByLabel('Ceded loss').fill('500000');

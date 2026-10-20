@@ -1,0 +1,60 @@
+/*
+ * Retrocession remote visual supplements.
+ *
+ * The canonical ui.css owns the shared operational record design. These rules
+ * only cover discovery affordances added by this remote: the queue filter,
+ * contract-picker links, and related upstream record groups.
+ */
+
+.eia-queue-search {
+  background: #fff;
+  border: 1px solid var(--eia-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 2px rgba(16, 42, 67, .04);
+}
+
+.eia-queue-search input[type="search"] {
+  flex: 1 1 320px;
+  min-height: 38px !important;
+  font-size: 13px !important;
+}
+
+.eia-queue-search .eia-muted {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.eia-field a[data-testid="create-contract-link"] {
+  font-size: 11px;
+  color: var(--eia-blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.eia-field a[data-testid="create-contract-link"]:hover {
+  text-decoration: underline;
+}
+
+.eia-related-group {
+  margin-top: 12px;
+}
+
+.eia-related-title {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--eia-muted);
+}
+
+.eia-related-record em {
+  font-style: normal;
+  font-size: 9px;
+  color: #60758a;
+  border: 1px solid #dce5ed;
+  border-radius: 3px;
+  padding: 1px 4px;
+}

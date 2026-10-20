@@ -22,9 +22,17 @@ Retrocession federated remote: screens, widgets, record tabs, and transaction co
   retrocession queue, the record panel, a summary grid, and Overview / FS-RI Hand-off / Status History tabs.
 - Create retrocession primary action opens the shared modal form; lifecycle and FS-RI hand-off actions
   call the existing API.
+- Record discovery: `?record=` deep links select a record (including one outside the loaded queue),
+  `?new=1` opens the create form, and `popstate` keeps the workbench in step with the shell URL.
+- The retrocession queue filters by number, contract, or status; the create form uses the shared
+  predictive `EntityPicker` against `/api/v1/contracts/search` on the ASSUMED book and links the
+  selected contract to `/contract?record=`.
+- The overview carries a why-this-matters context panel plus cross-links to the upstream assumed
+  contract and its assumed claims. FS-RI remains the owner of actual retro amounts and statements.
 - Canonical `src/ui.css` copied from the shell and loaded through `style-loader` / `css-loader`.
 - Dev server proxies `/api` to `http://localhost:8094`.
-- Playwright tests with a mocked API cover the record layout, create flow, lifecycle, and FS-RI hand-off.
+- Playwright tests with a mocked API cover the record layout, URL discovery, queue filter, contract
+  picker, cross-links, create flow, lifecycle, and FS-RI hand-off.
 
 ## Local run
 
