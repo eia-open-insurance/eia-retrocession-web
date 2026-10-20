@@ -73,10 +73,11 @@ test('renders the shared operational record and sends the ASSUMED book header', 
   await expect(page.getByTestId('summary-fsri-status')).toHaveText('NOT SENT');
   await expect(page.getByTestId('summary-fsri-handoff')).toHaveText('—');
 
-  await expect(page.getByRole('tab')).toHaveCount(3);
+  await expect(page.getByRole('tab')).toHaveCount(4);
   await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'FS-RI Hand-off' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Status History' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Activity' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create retrocession' })).toBeVisible();
 

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import EntityPicker from './EntityPicker.jsx';
+import ActivityPanel from './ActivityPanel.jsx';
+import { activityEndpoint, activityItems } from './activity.js';
 import { navigate, recordHref } from './navigation.js';
 import './ui.css';
 import './ui-overrides.css';
@@ -27,7 +29,8 @@ const NEXT_STATUS = {
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'handoff', label: 'FS-RI Hand-off' },
-  { id: 'history', label: 'Status History' }
+  { id: 'history', label: 'Status History' },
+  { id: 'activity', label: 'Activity' }
 ];
 
 const EMPTY_FORM = {
@@ -270,6 +273,8 @@ export default function App() {
   const [contract, setContract] = useState(null);
   const [relatedClaims, setRelatedClaims] = useState([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [activity, setActivity] = useState({ items: [], loading: false, error: '' });
+  const [activityNonce, setActivityNonce] = useState(0);
   const discoveryRef = useRef(new Set());
 
   const selected = retrocessions.find((record) => record.id === selectedId) || null;
@@ -392,6 +397,36 @@ export default function App() {
     setHandoffContractNumber('');
   }, [selectedId]);
 
+  /**
+   * Event-derived activity for the selected retro case. The fetch starts when
+   * the record is selected and owns its own loading/error state, so a slow or
+   * unavailable event service never blocks the retrocession record.
+   *
+   * Events come from `GET /api/v1/events/aggregate/{retrocessionId}?limit=50`
+   * with the tenant header; they are facts that already happened, not editable
+   * state.
+   */
+  useEffect(() => {
+    if (!selectedId) {
+      setActivity({ items: [], loading: false, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setActivity({ items: [], loading: true, error: '' });
+    api(activityEndpoint(selectedId))
+      .then((payload) => {
+        if (cancelled) return;
+        setActivity({ items: activityItems(payload), loading: false, error: '' });
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setActivity({ items: [], loading: false, error: cause.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, activityNonce]);
+
   useEffect(() => {
     if (!showCreate) return undefined;
     const onKeyDown = (event) => {
@@ -440,6 +475,7 @@ export default function App() {
   async function refresh() {
     setError('');
     setNotice('');
+    setActivityNonce((value) => value + 1);
     setLoading(true);
     try {
       await load();
@@ -448,6 +484,10 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function refreshActivity() {
+    setActivityNonce((value) => value + 1);
   }
 
   async function submit(event) {
@@ -474,6 +514,7 @@ export default function App() {
       setShowCreate(false);
       navigate(created?.id ? recordHref('retrocession', created.id) : '/retrocession');
       const items = await load();
+      setActivityNonce((value) => value + 1);
       if (created?.id) {
         setSelectedId(created.id);
       } else if (items[0]) {
@@ -502,6 +543,7 @@ export default function App() {
         body: { targetStatus, ...extra }
       });
       await load();
+      setActivityNonce((value) => value + 1);
       setSelectedId(record.id);
       setNotice(`${record.retrocessionNumber} is now ${updated?.status || targetStatus}.`);
     } catch (cause) {
@@ -1040,6 +1082,15 @@ export default function App() {
                     API exposes the current record rather than a per-transition audit log.
                   </p>
                 </section>
+              )}
+
+              {tab === 'activity' && (
+                <ActivityPanel
+                  items={activity.items}
+                  loading={activity.loading}
+                  error={activity.error}
+                  onRefresh={refreshActivity}
+                />
               )}
             </>
           )}

@@ -19,7 +19,10 @@ Retrocession federated remote: screens, widgets, record tabs, and transaction co
 - Async bootstrap (`index.jsx` imports `bootstrap.jsx`), shared singleton React and React DOM.
 - `@swc/core` pinned to `1.10.7`.
 - Shared EIA operational record design: `.eia-page-head` with the ASSUMED book badge and Refresh, a
-  retrocession queue, the record panel, a summary grid, and Overview / FS-RI Hand-off / Status History tabs.
+  retrocession queue, the record panel, a summary grid, and Overview / FS-RI Hand-off / Status History /
+  Activity tabs. The Activity tab reads the append-only event stream from
+  `GET /api/v1/events/aggregate/{retrocessionId}?limit=50` and renders the case status, version,
+  FS-RI hand-off, and ceded-amount facts as an event-derived timeline.
 - Create retrocession primary action opens the shared modal form; lifecycle and FS-RI hand-off actions
   call the existing API.
 - Record discovery: `?record=` deep links select a record (including one outside the loaded queue),
