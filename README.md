@@ -18,9 +18,13 @@ Retrocession federated remote: screens, widgets, record tabs, and transaction co
 - React 19 remote exposed as `./App` through Webpack 5 Module Federation, dev server on port `3007`.
 - Async bootstrap (`index.jsx` imports `bootstrap.jsx`), shared singleton React and React DOM.
 - `@swc/core` pinned to `1.10.7`.
-- Workbench shows the ASSUMED book header, retro metrics, create form, retro-case table, and lifecycle actions.
+- Shared EIA operational record design: `.eia-page-head` with the ASSUMED book badge and Refresh, a
+  retrocession queue, the record panel, a summary grid, and Overview / FS-RI Hand-off / Status History tabs.
+- Create retrocession primary action opens the shared modal form; lifecycle and FS-RI hand-off actions
+  call the existing API.
+- Canonical `src/ui.css` copied from the shell and loaded through `style-loader` / `css-loader`.
 - Dev server proxies `/api` to `http://localhost:8094`.
-- One Playwright test with a mocked API.
+- Playwright tests with a mocked API cover the record layout, create flow, lifecycle, and FS-RI hand-off.
 
 ## Local run
 
