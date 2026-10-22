@@ -36,6 +36,14 @@ async function json(route, status, body, headers = {}) {
   });
 }
 
+// These tests are about the record and its actions, not the Overview
+// notifications card; keep its selection-time lookup local and empty.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/v1/notifications**', async (route) => {
+    await json(route, 200, { items: [] });
+  });
+});
+
 test('renders the shared operational record and sends the ASSUMED book header', async ({ page }) => {
   const books = [];
   const existing = retrocession();
@@ -146,7 +154,10 @@ test('creates a retrocession from the modal against the ASSUMED book', async ({ 
 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('heading', { name: 'RET-000000002' })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('RET-000000002');
+  // Scope the live region to the creation notice: the notifications card also
+  // exposes a loading status while its selection-time lookup is in flight.
+  await expect(page.getByRole('status').filter({ hasText: 'RET-000000002' }))
+    .toContainText('created on the ASSUMED book');
   await expect(page.getByTestId('summary-ceded-premium')).toHaveText('1,250,000.00 GBP');
   await expect(page.getByTestId('summary-ceded-loss')).toHaveText('500,000.00 GBP');
 

@@ -145,6 +145,12 @@ async function mockRetroApi(page, {
     await json(route, 200, { items: [] });
   });
 
+  // Activity tests are not about the Overview notifications card; keep the
+  // selection-time lookup local and empty so the suite never reaches the proxy.
+  await page.route('**/api/v1/notifications**', async (route) => {
+    await json(route, 200, { items: [] });
+  });
+
   await page.route('**/api/v1/events/aggregate/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());

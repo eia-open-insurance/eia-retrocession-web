@@ -1,7 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import EntityPicker from './EntityPicker.jsx';
 import ActivityPanel from './ActivityPanel.jsx';
+import NotificationsPanel from './NotificationsPanel.jsx';
 import { activityEndpoint, activityItems } from './activity.js';
+import {
+  emptyRetrocessionNotificationsState,
+  retrocessionNotificationCount,
+  retrocessionNotifications,
+  retrocessionNotificationsEndpoint
+} from './notifications.js';
 import { navigate, recordHref } from './navigation.js';
 import './ui.css';
 import './ui-overrides.css';
@@ -240,8 +247,18 @@ function problemMessage(body, fallback) {
   return `${summary} (${details})`;
 }
 
+/** Keeps the problem code visible in card-local projections that show a reason. */
+function failureMessage(error) {
+  if (!error) return '';
+  return error.code ? `${error.code}: ${error.message}` : error.message;
+}
+
 async function api(path, options = {}) {
-  const headers = { ...BOOK_HEADERS };
+  // Notifications is tenant-scoped rather than book-scoped, so a read can opt
+  // out of the ASSUMED book header with `book: false`.
+  const headers = options.book === false
+    ? { 'X-EIA-Tenant': TENANT }
+    : { ...BOOK_HEADERS };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {
     method: options.method || 'GET',
@@ -250,7 +267,10 @@ async function api(path, options = {}) {
   });
   const body = await readJson(response);
   if (!response.ok) {
-    throw new Error(problemMessage(body, `Request failed: ${response.status}`));
+    const failure = new Error(problemMessage(body, `Request failed: ${response.status}`));
+    failure.code = body?.code;
+    failure.status = response.status;
+    throw failure;
   }
   return body;
 }
@@ -273,6 +293,8 @@ export default function App() {
   const [contract, setContract] = useState(null);
   const [relatedClaims, setRelatedClaims] = useState([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [notifications, setNotifications] = useState(emptyRetrocessionNotificationsState);
+  const [notificationsNonce, setNotificationsNonce] = useState(0);
   const [activity, setActivity] = useState({ items: [], loading: false, error: '' });
   const [activityNonce, setActivityNonce] = useState(0);
   const discoveryRef = useRef(new Set());
@@ -398,6 +420,48 @@ export default function App() {
   }, [selectedId]);
 
   /**
+   * Related notifications for the selected retro case. Notifications are
+   * delivery artifacts owned by the Notifications vertical, so this is a
+   * read-only projection: the fetch starts after the record is on screen and
+   * owns its own loading/error state, and a slow or unavailable Notifications
+   * service never blocks or fails the retrocession render.
+   *
+   * Notifications is tenant-scoped rather than book-scoped, so the ASSUMED book
+   * header is deliberately not sent on this platform read.
+   */
+  useEffect(() => {
+    if (!selectedId) {
+      setNotifications(emptyRetrocessionNotificationsState());
+      return undefined;
+    }
+    let cancelled = false;
+    setNotifications({ items: [], count: 0, loading: true, error: '' });
+    api(retrocessionNotificationsEndpoint(selectedId), { book: false })
+      .then((payload) => {
+        if (cancelled) return;
+        const items = retrocessionNotifications(payload, selectedId);
+        setNotifications({
+          items,
+          count: retrocessionNotificationCount(payload, items),
+          loading: false,
+          error: ''
+        });
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setNotifications({
+          items: [],
+          count: 0,
+          loading: false,
+          error: failureMessage(cause)
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, notificationsNonce]);
+
+  /**
    * Event-derived activity for the selected retro case. The fetch starts when
    * the record is selected and owns its own loading/error state, so a slow or
    * unavailable event service never blocks the retrocession record.
@@ -476,6 +540,7 @@ export default function App() {
     setError('');
     setNotice('');
     setActivityNonce((value) => value + 1);
+    setNotificationsNonce((value) => value + 1);
     setLoading(true);
     try {
       await load();
@@ -967,6 +1032,14 @@ export default function App() {
                       )}
                     </div>
                   </section>
+
+                  <NotificationsPanel
+                    retrocessionId={selected.id}
+                    items={notifications.items}
+                    count={notifications.count}
+                    loading={notifications.loading}
+                    error={notifications.error}
+                  />
                 </section>
               )}
 

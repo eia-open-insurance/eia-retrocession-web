@@ -18,6 +18,17 @@ The format is based on Keep a Changelog and the project uses Semantic Versioning
   and the rejection or FS-RI error. The card carries its own loading, error,
   empty, and refresh states plus an event-derived/append-only/source-of-truth
   note, so a slow or unavailable event service never blocks the record.
+- Related-notifications Overview card: selecting a retro case fetches
+  `GET /api/v1/notifications?sourceType=RETROCESSION&sourceId={id}` with the
+  tenant header (notifications is tenant-scoped, so no book header) and shows the
+  total count plus the three newest notifications (number, subject, delivery
+  status, and creation time, newest first). Each number opens
+  `/notifications?record={id}`, and **View all notifications** opens the
+  Notifications queue filtered to this retro case
+  (`/notifications?sourceType=RETROCESSION&sourceId={id}`). Rows from another
+  source are dropped, an `{ items }` envelope is accepted, and loading, empty,
+  and failure states stay inside the card so a slow or unavailable Notifications
+  service never blocks the retrocession record.
 
 ### Changed
 
@@ -33,3 +44,8 @@ The format is based on Keep a Changelog and the project uses Semantic Versioning
 - Added Playwright coverage for the activity aggregate path and tenant header, newest-first ordering
   and rendering, the empty state, a contained 503, the retro payload facts, refetching on selection,
   and the card refresh.
+- Added Playwright coverage for related notifications: the `sourceType=RETROCESSION`/`sourceId` query
+  and tenant header (with no book header), the count and newest-three preview (newest first, unrelated
+  rows dropped), the `/notifications?record={id}` and filtered-queue links, refetching on selection,
+  the `{ items }` envelope, the empty state, a contained 503, and rendering the record while the
+  Notifications API is still in flight.

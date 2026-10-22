@@ -32,10 +32,21 @@ Retrocession federated remote: screens, widgets, record tabs, and transaction co
   selected contract to `/contract?record=`.
 - The overview carries a why-this-matters context panel plus cross-links to the upstream assumed
   contract and its assumed claims. FS-RI remains the owner of actual retro amounts and statements.
+- The overview's **Related notifications** card lists the Notifications messages whose
+  `sourceType`/`sourceId` point at the selected retro case from
+  `GET /api/v1/notifications?sourceType=RETROCESSION&sourceId={id}`: the total count and the three
+  newest notifications with their number, subject, delivery status, and creation time (newest first).
+  Each notification number opens its record at `/notifications?record={id}`, and **View all
+  notifications** opens the Notifications queue filtered to this retro case
+  (`/notifications?sourceType=RETROCESSION&sourceId={id}`). An empty state and a delivery-artifact note
+  are local to the card; a slow or failing Notifications API renders inside it and never blocks the
+  retrocession record.
 - Canonical `src/ui.css` copied from the shell and loaded through `style-loader` / `css-loader`.
 - Dev server proxies `/api` to `http://localhost:8094`.
 - Playwright tests with a mocked API cover the record layout, URL discovery, queue filter, contract
-  picker, cross-links, create flow, lifecycle, and FS-RI hand-off.
+  picker, cross-links, create flow, lifecycle, FS-RI hand-off, and related notifications (source query
+  and tenant header, count and newest-three preview, record and filtered-queue links, refetching on
+  selection, empty state, contained error, and non-blocking fetch).
 
 ## Local run
 
